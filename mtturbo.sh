@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.3"
+SCRIPT_VERSION="1.1.4"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -801,6 +801,26 @@ health_check_action() {
   if sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null | grep -q bbr; then ok "BBR congestion control active"; else warn "BBR not active (run menu 7)"; fi
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
     if ufw status | grep -q "$PORT/tcp"; then ok "UFW allows $PORT/tcp"; else warn "UFW active but $PORT/tcp not allowed (run: ufw allow $PORT/tcp)"; fi
+  fi
+  if [ "$ENGINE" = "telemt" ]; then
+    # Sponsored channel (ad-tag) only works via Telegram MIDDLE-PROXY mode.
+    # If telemt fell back to Direct DC mode, the tag is silently ignored.
+    if journalctl -u "$svc" -n 300 --no-pager 2>/dev/null | grep -q "Middle Proxy Mode"; then
+      ok "telemt: Middle Proxy mode active (sponsor ad-tag path)"
+      local me_fail
+      me_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -c 'All ME servers for DC failed' || true)"
+      if [ "${me_fail:-0}" -ge 5 ]; then
+        warn "telemt: ME pool failures in last 100 log lines (${me_fail}) — sponsored channel may not inject"
+        warn "        check: journalctl -u $svc -n 60 | grep -iE 'middle|pool'"
+      fi
+      if [ -n "${TAG:-}" ]; then
+        ok "ad-tag registered: ${TAG}"
+      else
+        warn "no ad-tag saved — sponsored channel cannot show (menu 3)"
+      fi
+    else
+      warn "telemt: 'Middle Proxy Mode' not seen in recent logs — sponsor tag may be inactive"
+    fi
   fi
   echo ""
   local conns
