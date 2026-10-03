@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.1"
+SCRIPT_VERSION="1.1.2"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -346,6 +346,8 @@ write_telemt_config() {
   local tag_line="" host_line=""
   [ -n "$4" ] && tag_line="ad_tag = \"$4\""
   [ -n "$5" ] && host_line="public_host = \"$5\""
+  # telemt stores TLS-front data relative to its working directory
+  mkdir -p "${MTTURBO_VAR}/tlsfront"
   cat > "${MTTURBO_HOME}/telemt.toml" <<EOF
 # MTTurbo - telemt engine config (generated)
 [general]
@@ -496,7 +498,10 @@ write_service() {
   else
     svc="$TELEMT_SERVICE"
     bin="$TELEMT_BIN"
-    exec="cd ${MTTURBO_VAR} && ${bin} ${MTTURBO_HOME}/telemt.toml"
+    # NOTE: systemd does NOT run ExecStart through a shell — 'cd X && bin' makes
+    # systemd try to execute the binary 'cd' (status=203/EXEC). WorkingDirectory
+    # below already puts the process into MTTURBO_VAR, so call the binary directly.
+    exec="${bin} ${MTTURBO_HOME}/telemt.toml"
   fi
   cat > "/etc/systemd/system/${svc}.service" <<EOF
 # MTTurbo service (${1} engine) - generated
@@ -739,7 +744,12 @@ sponsor_action() {
       systemctl stop "$MTG_SERVICE" 2>/dev/null; systemctl disable "$MTG_SERVICE" 2>/dev/null
       rm -f "/etc/systemd/system/${MTG_SERVICE}.service"
       write_service "telemt"
-      ok "Switched to telemt with ad-tag."
+      sleep 2
+      if systemctl is-active --quiet "$TELEMT_SERVICE" && port_in_use "$PORT"; then
+        ok "Switched to telemt with ad-tag — proxy is back online."
+      else
+        err "telemt failed to start. Check: journalctl -u $TELEMT_SERVICE -n 30"
+      fi
     fi
     pause_enter
     return 0
@@ -750,7 +760,12 @@ sponsor_action() {
     write_telemt_config "$PORT" "${SECRET:2:32}" "$DOMAIN" "$newtag" "$IP4"
     write_env "telemt" "$PORT" "$SECRET" "$DOMAIN" "$CHANNEL" "$newtag" "$IP4" "$IP6"
     write_service "telemt"
-    ok "Ad-tag updated — restart complete."
+    sleep 2
+    if systemctl is-active --quiet "$TELEMT_SERVICE" && port_in_use "$PORT"; then
+      ok "Ad-tag updated — restart complete."
+    else
+      err "telemt failed to start. Check: journalctl -u $TELEMT_SERVICE -n 30"
+    fi
   fi
   pause_enter
 }
