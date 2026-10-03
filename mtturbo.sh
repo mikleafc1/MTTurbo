@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.1.1"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -70,6 +70,20 @@ banner() {
 pause_enter() {
   echo ""
   read -r -p " Press Enter to return to the menu..." _
+}
+
+# Read a single answer even when the script is piped (curl ... | bash).
+# Falls back to /dev/tty when stdin is not a terminal; empty answer = cancel.
+confirm() {
+  local ans=""
+  if [ -t 0 ]; then
+    read -r -p "$1" ans
+  elif [ -r /dev/tty ]; then
+    read -r -p "$1" ans </dev/tty 2>/dev/null || ans=""
+  else
+    ans=""
+  fi
+  printf '%s' "$ans"
 }
 
 require_root() {
@@ -786,21 +800,57 @@ uninstall_action() {
   banner
   echo -e " ${BR}  ⚠️  UNINSTALL MTTURBO  ${N}"
   line "-" 58
-  read -r -p " 👉 Remove everything? [y/N]: " yn
+  read_env
+  local port="${PORT:-}" yn
+  echo -e " ${W}This will remove ALL of the following:${N}"
+  echo -e "   • systemd services ($MTG_SERVICE / $TELEMT_SERVICE)"
+  echo -e "   • engine binaries (mtg / telemt)"
+  echo -e "   • config & state ($MTTURBO_HOME, $MTTURBO_VAR)"
+  echo -e "   • the ${B}mtturbo${W} command itself (/usr/local/bin/mtturbo)"
+  echo -e "   • UFW rule + kernel tuning file (/etc/sysctl.d/99-mtturbo.conf)"
+  echo ""
+  yn="$(confirm " 👉 Remove everything? [y/N]: ")"
   if [[ "$yn" =~ ^[Yy]$ ]]; then
-    systemctl stop "$MTG_SERVICE" "$TELEMT_SERVICE" 2>/dev/null
-    systemctl disable "$MTG_SERVICE" "$TELEMT_SERVICE" 2>/dev/null
+    step "Stopping & disabling services"
+    # NOTE: stop/disable one unit at a time — a single call with both units
+    # aborts the whole transaction when one of them does not exist, leaving
+    # the running proxy alive after "uninstall".
+    systemctl stop "$MTG_SERVICE" 2>/dev/null
+    systemctl stop "$TELEMT_SERVICE" 2>/dev/null
+    systemctl disable "$MTG_SERVICE" 2>/dev/null
+    systemctl disable "$TELEMT_SERVICE" 2>/dev/null
     rm -f "/etc/systemd/system/${MTG_SERVICE}.service" "/etc/systemd/system/${TELEMT_SERVICE}.service"
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null
+    systemctl reset-failed 2>/dev/null
+    ok "Services stopped and removed"
+
+    step "Removing binaries, configs and the mtturbo command"
     rm -f "$MTG_BIN" "$TELEMT_BIN"
     rm -rf "$MTTURBO_HOME" "$MTTURBO_VAR"
+    rm -f /usr/local/bin/mtturbo
+    ok "Files removed (incl. /usr/local/bin/mtturbo)"
+
+    step "Restoring firewall & kernel defaults"
+    if [ -n "$port" ] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+      if ufw delete allow "${port}/tcp" >/dev/null 2>&1; then ok "UFW rule deleted for ${port}/tcp"; fi
+    fi
     rm -f /etc/sysctl.d/99-mtturbo.conf
     sysctl --system >/dev/null 2>&1
-    ok "MTTurbo fully removed."
+    ok "Tuning file removed (a reboot restores stock kernel values)"
+
+    echo ""
+    line "=" 58 "$G"
+    echo -e " ${BG}  ✅  MTTurbo fully uninstalled  ${N}"
+    line "=" 58 "$G"
+    echo -e " ${W}Verify: ${C}systemctl list-units | grep mtturbo${W}  →  nothing found${N}"
+    echo -e " ${W}Verify: ${C}ss -tlnp | grep ${port:-PORT}${W}      →  not listening${N}"
+    echo ""
+    info "Bye! 🚀"
+    exit 0
   else
     info "Cancelled."
+    pause_enter
   fi
-  pause_enter
 }
 
 # ------------------------- Main menu ---------------------------------------
@@ -846,5 +896,6 @@ command -v systemctl >/dev/null 2>&1 || { err "systemd is required."; exit 1; }
 case "${1:-}" in
   --quick) quick_install_action ;;
   --info)  print_proxy_info ;;
+  --uninstall) uninstall_action ;;
   *)       main_menu ;;
 esac
