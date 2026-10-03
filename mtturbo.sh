@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -146,6 +146,16 @@ gen_hex16() {
   else
     head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'
   fi
+}
+
+# Extract the raw 16-byte key (32 hex) that @MTProxybot expects.
+# Full link secret looks like: ee<32hex><domain-hex> — the bot wants ONLY <32hex>.
+raw_bot_secret() {
+  local s="${1:-${SECRET:-}}"
+  case "$s" in
+    ee*) echo "${s:2:32}" ;;
+    *)   echo "${s:0:32}" ;;
+  esac
 }
 
 str_to_hex() {
@@ -410,6 +420,7 @@ print_proxy_info() {
   fi
   echo ""
   echo -e " ${BY}Secret:${N} $secret"
+  echo -e " ${BY}Bot Key :${N} $(raw_bot_secret "$secret") ${W}<- send THIS to @MTProxybot (32 hex)${N}"
   echo ""
   echo -e " ${BM}▪ Telegram Desktop / Apps (tg link):${N}"
   while IFS= read -r l; do echo -e "   ${C}${l}${N}"; done < <(build_links "$ip4" "$port" "$secret" "$channel")
@@ -692,16 +703,22 @@ sponsor_action() {
   echo -e " ${M}B)${N} ${BC}Official @MTProxybot ad-tag (telemt engine only):${N}"
   echo -e "    1. Open @MTProxybot in Telegram  →  /setproxy"
   echo -e "    2. Send your server IP + port"
-  echo -e "    3. Register your channel → you get a 32-char TAG"
-  echo -e "    4. Paste that TAG below (telemt engine restarts with it)"
+  echo -e "    3. When the bot asks for the SECRET, send ONLY this 32-char key:"
+  echo ""
+  echo -e "       ${BM}$(raw_bot_secret)${N}"
+  echo ""
+  echo -e "       ${Y}(do NOT send the long ee... secret — the bot rejects it;${N}"
+  echo -e "        ${Y}it wants the raw 32-hex key only)${N}"
+  echo -e "    4. Register your channel → you get a 32-char TAG"
+  echo -e "    5. Paste that TAG below (telemt engine restarts with it)"
   echo ""
   if [ "${ENGINE}" != "telemt" ]; then
     warn "Current engine is mtg (Turbo) — ad-tag needs the telemt engine."
     read -r -p " 👉 Reinstall now with telemt? [y/N]: " yn
     if [[ "$yn" =~ ^[Yy]$ ]]; then
-      local tag
+      local tag secret16
       tag="$(ask_tag)"
-      local secret16="${SECRET:2:32}"
+      secret16="$(raw_bot_secret)"
       install_telemt || { pause_enter; return 1; }
       write_telemt_config "$PORT" "$secret16" "$DOMAIN" "$tag" "$IP4"
       write_env "telemt" "$PORT" "$SECRET" "$DOMAIN" "$CHANNEL" "$tag" "$IP4" "$IP6"
