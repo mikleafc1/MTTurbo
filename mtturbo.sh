@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.4"
+SCRIPT_VERSION="1.1.5"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -805,21 +805,30 @@ health_check_action() {
   if [ "$ENGINE" = "telemt" ]; then
     # Sponsored channel (ad-tag) only works via Telegram MIDDLE-PROXY mode.
     # If telemt fell back to Direct DC mode, the tag is silently ignored.
-    if journalctl -u "$svc" -n 300 --no-pager 2>/dev/null | grep -q "Middle Proxy Mode"; then
+    # telemt 3.5.x logs the module path 'middle_proxy::...' with lines like
+    # "RPC handshake OK" / "ME writer restored"; older builds printed a
+    # literal "Middle Proxy Mode" banner. Accept ANY of these markers.
+    if journalctl -u "$svc" -n 300 --no-pager 2>/dev/null | grep -qE "middle_proxy|RPC handshake OK|ME writer|Middle Proxy Mode"; then
       ok "telemt: Middle Proxy mode active (sponsor ad-tag path)"
       local me_fail
-      me_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -c 'All ME servers for DC failed' || true)"
+      me_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -ciE 'All ME servers|ME (pool|servers?|writer).{0,40}(failed|lost|exhaust)|middle_proxy.*(failed|lost|exhaust)' || true)"
       if [ "${me_fail:-0}" -ge 5 ]; then
         warn "telemt: ME pool failures in last 100 log lines (${me_fail}) — sponsored channel may not inject"
         warn "        check: journalctl -u $svc -n 60 | grep -iE 'middle|pool'"
       fi
-      if [ -n "${TAG:-}" ]; then
-        ok "ad-tag registered: ${TAG}"
-      else
-        warn "no ad-tag saved — sponsored channel cannot show (menu 3)"
+      local up_fail
+      up_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -c 'Upstream failed after retries' || true)"
+      if [ "${up_fail:-0}" -ge 3 ]; then
+        info "direct-DC fallback timeouts seen (${up_fail}/100 lines) — non-fatal while Middle Proxy path is OK"
       fi
     else
-      warn "telemt: 'Middle Proxy Mode' not seen in recent logs — sponsor tag may be inactive"
+      warn "telemt: Middle-Proxy traffic not seen in recent logs — sponsor tag may be inactive"
+      warn "        check: journalctl -u $svc -n 100 | grep -iE 'middle_proxy|ME |direct'"
+    fi
+    if [ -n "${TAG:-}" ]; then
+      ok "ad-tag registered: ${TAG}"
+    else
+      warn "no ad-tag saved — sponsored channel cannot show (menu 3)"
     fi
   fi
   echo ""
@@ -835,7 +844,7 @@ health_check_action() {
   fi
   echo ""
   echo -e " ${W}Last 5 log lines:${N}"
-  journalctl -u "$svc" -n 5 --no-pager 2>/dev/null | sed 's/^/   /'
+  journalctl -u "$svc" -n 30 --no-pager 2>/dev/null | grep -v 'early eof' | tail -n 5 | sed 's/^/   /'
   pause_enter
 }
 
