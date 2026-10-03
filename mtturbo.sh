@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.2"
+SCRIPT_VERSION="1.1.3"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -720,6 +720,22 @@ sponsor_action() {
   echo -e "    ${Y}To change it, reinstall or edit ${MTTURBO_ENV}.${N}"
   echo ""
   echo -e " ${M}B)${N} ${BC}Official @MTProxybot ad-tag (telemt engine only):${N}"
+  # live status so the user can SEE what is missing
+  if [ -n "${TAG:-}" ]; then
+    echo -e "    ${W}Saved TAG :${N} ${G}${TAG}${N}"
+  else
+    echo -e "    ${W}Saved TAG :${N} ${R}NONE — this is why the sponsored channel is not active${N}"
+  fi
+  if grep -qs '^ad_tag' "${MTTURBO_HOME}/telemt.toml" 2>/dev/null; then
+    echo -e "    ${W}telemt.toml:${N} ${G}ad_tag present${N}"
+  else
+    echo -e "    ${W}telemt.toml:${N} ${Y}ad_tag NOT set${N}"
+  fi
+  if systemctl is-active --quiet "$TELEMT_SERVICE" 2>/dev/null; then
+    echo -e "    ${W}Service   :${N} ${G}mtturbo-telemt running${N}"
+  else
+    echo -e "    ${W}Service   :${N} ${R}mtturbo-telemt NOT running${N}"
+  fi
   echo -e "    1. Open @MTProxybot in Telegram  →  /setproxy"
   echo -e "    2. Send your server IP + port"
   echo -e "    3. When the bot asks for the SECRET, send ONLY this 32-char key:"
