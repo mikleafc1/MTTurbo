@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.6"
+SCRIPT_VERSION="1.1.7"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -352,10 +352,6 @@ write_telemt_config() {
 # MTTurbo - telemt engine config (generated)
 [general]
 use_middle_proxy = true
-# ME-only routing: never open the Direct-DC fallback pool. DC:8888 is
-# unreachable from most datacenter IPs anyway, so the fallback only
-# produces endless connect-timeout log spam ("No healthy upstreams").
-me2dc_fallback = false
 log_level = "normal"
 ${tag_line}
 
@@ -494,7 +490,7 @@ open_firewall() {
 # ------------------------- Service management ------------------------------
 write_service() {
   # write_service <engine: mtg|telemt>
-  local svc bin exec
+  local svc bin exec env_line=""
   if [ "$1" = "mtg" ]; then
     svc="$MTG_SERVICE"
     bin="$MTG_BIN"
@@ -506,6 +502,11 @@ write_service() {
     # systemd try to execute the binary 'cd' (status=203/EXEC). WorkingDirectory
     # below already puts the process into MTTURBO_VAR, so call the binary directly.
     exec="${bin} ${MTTURBO_HOME}/telemt.toml"
+    # Silence the Direct-DC fallback module (DC:8888 is unreachable from most
+    # datacenter IPs -> endless connect-timeout spam). Routing is untouched:
+    # telemt default keeps the listener always-up (direct-first, ME joins when
+    # ready). RUST_LOG overrides config log_level. ME logs remain visible.
+    env_line="Environment=RUST_LOG=info,telemt::transport::upstream=off"
   fi
   cat > "/etc/systemd/system/${svc}.service" <<EOF
 # MTTurbo service (${1} engine) - generated
@@ -518,6 +519,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=${exec}
 WorkingDirectory=${MTTURBO_VAR}
+${env_line}
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -808,33 +810,35 @@ health_check_action() {
   fi
   if [ "$ENGINE" = "telemt" ]; then
     # Sponsored channel (ad-tag) only works via Telegram MIDDLE-PROXY mode.
-    # If telemt fell back to Direct DC mode, the tag is silently ignored.
-    # telemt 3.5.x logs the module path 'middle_proxy::...' with lines like
-    # "RPC handshake OK" / "ME writer restored"; older builds printed a
-    # literal "Middle Proxy Mode" banner. Accept ANY of these markers.
-    if journalctl -u "$svc" -n 300 --no-pager 2>/dev/null | grep -qE "middle_proxy|RPC handshake OK|ME writer|Middle Proxy Mode"; then
+    # Success = an actual ME handshake/pool line. NOTE: pool_init FAILURE
+    # lines also carry the 'middle_proxy' module path, so module presence
+    # alone is NOT proof of a healthy sponsor path.
+    local me_fail
+    if journalctl -u "$svc" -n 300 --no-pager 2>/dev/null | grep -qE "RPC handshake OK|ME writer restored|ME writer created|Middle Proxy Mode"; then
       ok "telemt: Middle Proxy mode active (sponsor ad-tag path)"
-      local me_fail
       me_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -ciE 'All ME servers|ME (pool|servers?|writer).{0,40}(failed|lost|exhaust)|middle_proxy.*(failed|lost|exhaust)' || true)"
       if [ "${me_fail:-0}" -ge 5 ]; then
-        if journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -q 'ME writer restored'; then
-          info "telemt: ${me_fail} transient ME drops in last 100 lines — writers auto-restored (self-heals, normal)"
+        if journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -qE 'RPC handshake OK|ME writer restored'; then
+          info "telemt: ${me_fail} transient ME drops in last 100 lines — auto-restored (self-heals, normal)"
         else
-          warn "telemt: ME pool failures in last 100 log lines (${me_fail}) — sponsored channel may not inject"
+          warn "telemt: ${me_fail} ME failures in last 100 lines, none recovered yet — sponsored channel may not inject"
         fi
         journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -iE 'All ME servers|ME (pool|servers?|writer).{0,40}(failed|lost|exhaust)|middle_proxy.*(failed|lost|exhaust)' | tail -n 3 | cut -c1-150 | sed 's/^/          /'
       fi
       local up_fail
       up_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -c 'Upstream failed after retries' || true)"
       if [ "${up_fail:-0}" -ge 3 ]; then
-        info "direct-DC fallback is dead on this server (${up_fail} timeouts/100 lines) — harmless, traffic rides the ME path"
-        if ! grep -q '^me2dc_fallback = false' "${MTTURBO_HOME}/telemt.toml" 2>/dev/null; then
-          info "        silence it:  sed -i '/^use_middle_proxy = true/a me2dc_fallback = false' ${MTTURBO_HOME}/telemt.toml && systemctl restart ${svc}"
+        info "direct-DC fallback is unreachable from this server (${up_fail} timeouts/100 lines) — harmless, traffic rides the ME path"
+        if [ ! -f "/etc/systemd/system/${svc}.service.d/logfilter.conf" ]; then
+          info "        silence the log spam:  mkdir -p /etc/systemd/system/${svc}.service.d && { echo '[Service]'; echo 'Environment=RUST_LOG=info,telemt::transport::upstream=off'; } > /etc/systemd/system/${svc}.service.d/logfilter.conf && systemctl daemon-reload && systemctl restart ${svc}"
         fi
       fi
+    elif journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -q 'All ME servers'; then
+      err "telemt: ME pool is DOWN (all ME servers failing) — listener may stay closed, proxy offline"
+      fails=$((fails+1))
+      warn "        telemt retries automatically. If 443 stays closed >2 min: systemctl restart ${svc}"
     else
-      warn "telemt: Middle-Proxy traffic not seen in recent logs — sponsor tag may be inactive"
-      warn "        check: journalctl -u $svc -n 100 | grep -iE 'middle_proxy|ME |direct'"
+      warn "telemt: Middle-Proxy traffic not seen yet — service may still be probing (~10s) or tag inactive"
     fi
     if [ -n "${TAG:-}" ]; then
       ok "ad-tag registered: ${TAG}"
