@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.8"
+SCRIPT_VERSION="1.1.9"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -268,12 +268,23 @@ ask_channel() {
 
 ask_tag() {
   local tag
-  read -r -p " 👉 @MTProxybot ad-tag (32 hex chars, empty to skip): " tag
-  tag="$(echo "$tag" | tr -d '[:space:]' | tr 'A-Z' 'a-z')"
-  if [ -n "$tag" ] && ! [[ "$tag" =~ ^[0-9a-f]{32}$ ]]; then
-    warn "Tag does not look like 32 hex chars — saving anyway."
-  fi
-  echo "$tag"
+  while true; do
+    read -r -p " 👉 @MTProxybot ad-tag (32 hex chars, empty to skip): " tag
+    tag="$(printf '%s' "$tag" | tr -d '[:space:]' | tr 'A-Z' 'a-z')"
+    if [ -z "$tag" ]; then
+      echo ""
+      return 0
+    fi
+    if [[ "$tag" =~ ^[0-9a-f]{32}$ ]]; then
+      echo "$tag"
+      return 0
+    fi
+    err "Invalid ad-tag. It must be exactly 32 hexadecimal characters (0-9, a-f)."
+  done
+}
+
+valid_ad_tag() {
+  [[ "${1:-}" =~ ^[0-9a-fA-F]{32}$ ]]
 }
 
 # ------------------------- Engine downloads --------------------------------
@@ -358,7 +369,10 @@ EOF
 write_telemt_config() {
   # $1 port  $2 hex16secret  $3 domain  $4 tag(optional)  $5 ip(optional)
   local tag_line="" host_line=""
-  [ -n "$4" ] && tag_line="ad_tag = \"$4\""
+  if [ -n "$4" ]; then
+    valid_ad_tag "$4" || { err "Refusing to write invalid Telemt ad-tag."; return 1; }
+    tag_line="ad_tag = \"$4\""
+  fi
   [ -n "$5" ] && host_line="public_host = \"$5\""
   # telemt stores TLS-front data relative to its working directory
   mkdir -p "${MTTURBO_VAR}/tlsfront"
@@ -396,19 +410,33 @@ tls_front_dir = "tlsfront"
 EOF
 }
 
+shell_quote() {
+  printf '%q' "${1:-}"
+}
+
 write_env() {
   # write_env ENGINE PORT SECRET DOMAIN CHANNEL TAG IP4 IP6
-  cat > "$MTTURBO_ENV" <<EOF
-# MTTurbo state (generated) - do not edit manually
-ENGINE="$1"
-PORT="$2"
-SECRET="$3"
-DOMAIN="$4"
-CHANNEL="$5"
-TAG="$6"
-IP4="$7"
-IP6="$8"
-EOF
+  local q_engine q_port q_secret q_domain q_channel q_tag q_ip4 q_ip6
+  q_engine="$(shell_quote "$1")"
+  q_port="$(shell_quote "$2")"
+  q_secret="$(shell_quote "$3")"
+  q_domain="$(shell_quote "$4")"
+  q_channel="$(shell_quote "$5")"
+  q_tag="$(shell_quote "$6")"
+  q_ip4="$(shell_quote "$7")"
+  q_ip6="$(shell_quote "$8")"
+  umask 077
+  {
+    printf '%s\n' '# MTTurbo state (generated) - do not edit manually'
+    printf 'ENGINE=%s\n' "$q_engine"
+    printf 'PORT=%s\n' "$q_port"
+    printf 'SECRET=%s\n' "$q_secret"
+    printf 'DOMAIN=%s\n' "$q_domain"
+    printf 'CHANNEL=%s\n' "$q_channel"
+    printf 'TAG=%s\n' "$q_tag"
+    printf 'IP4=%s\n' "$q_ip4"
+    printf 'IP6=%s\n' "$q_ip6"
+  } > "$MTTURBO_ENV"
   chmod 600 "$MTTURBO_ENV"
 }
 
@@ -417,11 +445,12 @@ read_env() {
 }
 
 build_links() {
-  # build_links <ip> <port> <secret> <channel>
-  local ip="$1" port="$2" secret="$3" channel="$4" ch=""
-  [ -n "$channel" ] && ch="&channel=${channel}"
-  echo "tg://proxy?server=${ip}&port=${port}&secret=${secret}${ch}"
-  echo "https://t.me/proxy?server=${ip}&port=${port}&secret=${secret}${ch}"
+  # build_links <ip> <port> <secret>
+  # MTProxy native links use server/port/secret. Sponsored-channel promotion
+  # is configured through @MTProxybot and Telemt ad_tag, not a &channel= query.
+  local ip="$1" port="$2" secret="$3"
+  echo "tg://proxy?server=${ip}&port=${port}&secret=${secret}"
+  echo "https://t.me/proxy?server=${ip}&port=${port}&secret=${secret}"
 }
 
 print_proxy_info() {
@@ -440,10 +469,10 @@ print_proxy_info() {
   echo -e " ${W}Port   :${N} $port"
   echo -e " ${W}IPv4   :${N} $ip4"
   [ -n "$ip6" ] && echo -e " ${W}IPv6   :${N} $ip6"
-  [ -n "$channel" ] && echo -e " ${W}Channel:${N} @${channel}"
+  [ -n "$channel" ] && echo -e " ${W}Requested channel:${N} @${channel} ${Y}(promotion is controlled by @MTProxybot)${N}"
   if [ "$engine" = "telemt" ]; then
     if [ -n "$tag" ]; then
-      echo -e " ${W}Ad-Tag :${N} $tag ${G}(official sponsored channel active)${N}"
+      echo -e " ${W}Ad-Tag :${N} $tag ${G}(configured)${N}"
     else
       echo -e " ${W}Ad-Tag :${N} ${Y}not set — register via @MTProxybot (menu 3)${N}"
     fi
@@ -453,10 +482,10 @@ print_proxy_info() {
   echo -e " ${BY}Bot Key :${N} $(raw_bot_secret "$secret") ${W}<- send THIS to @MTProxybot (32 hex)${N}"
   echo ""
   echo -e " ${BM}▪ Telegram Desktop / Apps (tg link):${N}"
-  while IFS= read -r l; do echo -e "   ${C}${l}${N}"; done < <(build_links "$ip4" "$port" "$secret" "$channel")
+  while IFS= read -r l; do echo -e "   ${C}${l}${N}"; done < <(build_links "$ip4" "$port" "$secret")
   if [ -n "$ip6" ]; then
     echo -e " ${BM}▪ IPv6 links:${N}"
-    while IFS= read -r l; do echo -e "   ${C}${l}${N}"; done < <(build_links "[${ip6}]" "$port" "$secret" "$channel")
+    while IFS= read -r l; do echo -e "   ${C}${l}${N}"; done < <(build_links "[${ip6}]" "$port" "$secret")
   fi
   line "=" 58 "$G"
   return 0
@@ -588,7 +617,7 @@ install_engine() {
   if [ "$engine" = "mtg" ]; then
     write_mtg_config "$port" "$tls_secret"
   else
-    write_telemt_config "$port" "$secret16" "$domain" "$tag" "$ip4"
+    write_telemt_config "$port" "$secret16" "$domain" "$tag" "$ip4" || return 1
   fi
   write_env "$engine" "$port" "$tls_secret" "$domain" "$channel" "$tag" "$ip4" "$ip6"
 
@@ -696,7 +725,7 @@ change_port_action() {
   if [ "$engine" = "mtg" ]; then
     write_mtg_config "$port" "$secret"
   else
-    write_telemt_config "$port" "${SECRET:2:32}" "$DOMAIN" "$TAG" "$IP4"
+    write_telemt_config "$port" "${SECRET:2:32}" "$DOMAIN" "$TAG" "$IP4" || return 1
   fi
   write_env "$engine" "$port" "$secret" "$DOMAIN" "$CHANNEL" "$TAG" "$IP4" "$IP6"
   write_service "$engine"
@@ -732,77 +761,91 @@ sponsor_action() {
   line "-" 58
   read_env
   if [ -z "${ENGINE:-}" ]; then err "Nothing installed yet."; pause_enter; return 1; fi
+
   echo ""
-  echo -e " ${W}Two ways to promote your channel through the proxy:${N}"
+  echo -e " ${W}Official Telegram sponsored-channel setup:${N}"
+  echo -e " ${M}1)${N} Register this proxy in @MTProxybot with ${BC}/newproxy${N}."
+  echo -e " ${M}2)${N} Send ${BC}${IP4:-SERVER_IP}:${PORT}${N} to the bot."
+  echo -e " ${M}3)${N} When asked for the secret, send ONLY this 32-hex user secret:"
   echo ""
-  echo -e " ${M}A)${N} ${BC}Link parameter (works everywhere):${N}"
-  echo -e "    The proxy links include &channel=${CHANNEL:-your_channel}"
-  echo -e "    Telegram shows your channel as a suggestion after connect."
-  echo -e "    ${Y}To change it, reinstall or edit ${MTTURBO_ENV}.${N}"
+  echo -e "       ${BM}$(raw_bot_secret "${SECRET:-}")${N}"
   echo ""
-  echo -e " ${M}B)${N} ${BC}Official @MTProxybot ad-tag (telemt engine only):${N}"
-  # live status so the user can SEE what is missing
-  if [ -n "${TAG:-}" ]; then
-    echo -e "    ${W}Saved TAG :${N} ${G}${TAG}${N}"
-  else
-    echo -e "    ${W}Saved TAG :${N} ${R}NONE — this is why the sponsored channel is not active${N}"
-  fi
-  if grep -qs '^ad_tag' "${MTTURBO_HOME}/telemt.toml" 2>/dev/null; then
-    echo -e "    ${W}telemt.toml:${N} ${G}ad_tag present${N}"
-  else
-    echo -e "    ${W}telemt.toml:${N} ${Y}ad_tag NOT set${N}"
-  fi
-  if systemctl is-active --quiet "$TELEMT_SERVICE" 2>/dev/null; then
-    echo -e "    ${W}Service   :${N} ${G}mtturbo-telemt running${N}"
-  else
-    echo -e "    ${W}Service   :${N} ${R}mtturbo-telemt NOT running${N}"
-  fi
-  echo -e "    1. Open @MTProxybot in Telegram  →  /setproxy"
-  echo -e "    2. Send your server IP + port"
-  echo -e "    3. When the bot asks for the SECRET, send ONLY this 32-char key:"
+  echo -e " ${M}4)${N} Copy the 32-hex ${BC}ad-tag${N} returned by @MTProxybot."
+  echo -e " ${M}5)${N} Paste it below. The script validates it, writes ${BC}ad_tag${N},"
+  echo -e "    keeps ${BC}use_middle_proxy = true${N}, and restarts Telemt."
+  echo -e " ${M}6)${N} In @MTProxybot use ${BC}/myproxies${N} → select the proxy → ${BC}Set promotion${N}."
+  echo -e " ${M}7)${N} Send a ${BC}public${N} channel link. Private channels cannot be promoted."
+  echo -e " ${M}8)${N} Telegram may take about ${BC}1 hour${N} to propagate the promotion."
   echo ""
-  echo -e "       ${BM}$(raw_bot_secret)${N}"
-  echo ""
-  echo -e "       ${Y}(do NOT send the long ee... secret — the bot rejects it;${N}"
-  echo -e "        ${Y}it wants the raw 32-hex key only)${N}"
-  echo -e "    4. Register your channel → you get a 32-char TAG"
-  echo -e "    5. Paste that TAG below (telemt engine restarts with it)"
-  echo ""
+
   if [ "${ENGINE}" != "telemt" ]; then
-    warn "Current engine is mtg (Turbo) — ad-tag needs the telemt engine."
-    read -r -p " 👉 Reinstall now with telemt? [y/N]: " yn
+    warn "Current engine is mtg (Turbo). Official ad-tag sponsorship requires Telemt."
+    read -r -p " 👉 Switch this installation to telemt now? [y/N]: " yn
     if [[ "$yn" =~ ^[Yy]$ ]]; then
       local tag secret16
       tag="$(ask_tag)"
-      secret16="$(raw_bot_secret)"
+      if [ -z "$tag" ]; then
+        warn "No ad-tag supplied; switch cancelled."
+        pause_enter
+        return 0
+      fi
+      secret16="$(raw_bot_secret "${SECRET:-}")"
       install_telemt || { pause_enter; return 1; }
-      write_telemt_config "$PORT" "$secret16" "$DOMAIN" "$tag" "$IP4"
+      write_telemt_config "$PORT" "$secret16" "$DOMAIN" "$tag" "$IP4" || { pause_enter; return 1; }
       write_env "telemt" "$PORT" "$SECRET" "$DOMAIN" "$CHANNEL" "$tag" "$IP4" "$IP6"
-      systemctl stop "$MTG_SERVICE" 2>/dev/null; systemctl disable "$MTG_SERVICE" 2>/dev/null
+      systemctl stop "$MTG_SERVICE" 2>/dev/null
+      systemctl disable "$MTG_SERVICE" 2>/dev/null
       rm -f "/etc/systemd/system/${MTG_SERVICE}.service"
       write_service "telemt"
       if wait_up "$TELEMT_SERVICE" "$PORT" 30; then
-        ok "Switched to telemt with ad-tag — proxy is back online."
+        ok "Switched to telemt and configured the validated ad-tag."
+        info "Finish the Telegram-side promotion with /myproxies → Set promotion."
       else
         err "telemt failed to start — last log lines:"
-        journalctl -u "$TELEMT_SERVICE" -n 8 --no-pager 2>/dev/null | sed 's/^/          /'
+        journalctl -u "$TELEMT_SERVICE" -n 12 --no-pager 2>/dev/null | sed 's/^/          /'
       fi
     fi
     pause_enter
     return 0
   fi
-  read -r -p " 👉 Enter new ad-tag (empty = keep current): " newtag
+
+  local current_tag="${TAG:-}" newtag=""
+  if valid_ad_tag "$current_tag"; then
+    echo -e " ${W}Saved ad-tag:${N} ${G}${current_tag}${N}"
+    if grep -Fqx "ad_tag = \"${current_tag}\"" "${MTTURBO_HOME}/telemt.toml" 2>/dev/null; then
+      echo -e " ${W}Config:${N} ${G}ad_tag matches saved state${N}"
+    else
+      warn "Saved ad-tag and telemt.toml do not match. Re-enter the tag to repair it."
+    fi
+  else
+    echo -e " ${W}Saved ad-tag:${N} ${Y}NONE${N}"
+  fi
+
+  read -r -p " 👉 Enter ad-tag from @MTProxybot (empty = keep current): " newtag
+  newtag="$(printf '%s' "$newtag" | tr -d '[:space:]' | tr 'A-Z' 'a-z')"
   if [ -n "$newtag" ]; then
-    newtag="$(echo "$newtag" | tr -d '[:space:]' | tr 'A-Z' 'a-z')"
-    write_telemt_config "$PORT" "${SECRET:2:32}" "$DOMAIN" "$newtag" "$IP4"
+    if ! valid_ad_tag "$newtag"; then
+      err "Invalid ad-tag. Nothing was changed."
+      pause_enter
+      return 1
+    fi
+    if ! write_telemt_config "$PORT" "$(raw_bot_secret "${SECRET:-}")" "$DOMAIN" "$newtag" "$IP4"; then
+      err "Could not write Telemt configuration."
+      pause_enter
+      return 1
+    fi
     write_env "telemt" "$PORT" "$SECRET" "$DOMAIN" "$CHANNEL" "$newtag" "$IP4" "$IP6"
     write_service "telemt"
     if wait_up "$TELEMT_SERVICE" "$PORT" 30; then
-      ok "Ad-tag updated — restart complete (port $PORT listening)."
+      ok "Validated ad-tag saved and Telemt restarted successfully."
+      info "Now use @MTProxybot → /myproxies → Set promotion if you have not done so already."
+      info "Telegram-side promotion propagation can take about 1 hour."
     else
-      err "telemt failed to start — last log lines:"
-      journalctl -u "$TELEMT_SERVICE" -n 8 --no-pager 2>/dev/null | sed 's/^/          /'
+      err "telemt failed to start — configuration was written but service is unhealthy."
+      journalctl -u "$TELEMT_SERVICE" -n 12 --no-pager 2>/dev/null | sed 's/^/          /'
     fi
+  elif [ -n "$current_tag" ] && ! valid_ad_tag "$current_tag"; then
+    err "The saved ad-tag is invalid. Enter a valid 32-hex tag to repair it."
   fi
   pause_enter
 }
@@ -830,7 +873,7 @@ health_check_action() {
     # alone is NOT proof of a healthy sponsor path.
     local me_fail
     if journalctl -u "$svc" -n 300 --no-pager 2>/dev/null | grep -qE "RPC handshake OK|ME writer restored|ME writer created|Middle Proxy Mode"; then
-      ok "telemt: Middle Proxy mode active (sponsor ad-tag path)"
+      ok "telemt: Middle Proxy transport has been observed healthy"
       me_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -ciE 'All ME servers|ME (pool|servers?|writer).{0,40}(failed|lost|exhaust)|middle_proxy.*(failed|lost|exhaust)' || true)"
       if [ "${me_fail:-0}" -ge 5 ]; then
         if journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -qE 'RPC handshake OK|ME writer restored'; then
@@ -855,10 +898,11 @@ health_check_action() {
     else
       warn "telemt: Middle-Proxy traffic not seen yet — service may still be probing (~10s) or tag inactive"
     fi
-    if [ -n "${TAG:-}" ]; then
-      ok "ad-tag registered: ${TAG}"
+    if valid_ad_tag "${TAG:-}" && grep -Fqx "ad_tag = \"${TAG}\"" "${MTTURBO_HOME}/telemt.toml" 2>/dev/null; then
+      ok "ad-tag is valid and matches telemt.toml: ${TAG}"
+      info "This confirms local configuration only; Telegram promotion must be set via @MTProxybot."
     else
-      warn "no ad-tag saved — sponsored channel cannot show (menu 3)"
+      warn "No valid configured ad-tag found — sponsored channel setup is incomplete (menu 3)."
     fi
   fi
   echo ""
