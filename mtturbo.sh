@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.5"
+SCRIPT_VERSION="1.1.6"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -352,6 +352,10 @@ write_telemt_config() {
 # MTTurbo - telemt engine config (generated)
 [general]
 use_middle_proxy = true
+# ME-only routing: never open the Direct-DC fallback pool. DC:8888 is
+# unreachable from most datacenter IPs anyway, so the fallback only
+# produces endless connect-timeout log spam ("No healthy upstreams").
+me2dc_fallback = false
 log_level = "normal"
 ${tag_line}
 
@@ -813,13 +817,20 @@ health_check_action() {
       local me_fail
       me_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -ciE 'All ME servers|ME (pool|servers?|writer).{0,40}(failed|lost|exhaust)|middle_proxy.*(failed|lost|exhaust)' || true)"
       if [ "${me_fail:-0}" -ge 5 ]; then
-        warn "telemt: ME pool failures in last 100 log lines (${me_fail}) — sponsored channel may not inject"
-        warn "        check: journalctl -u $svc -n 60 | grep -iE 'middle|pool'"
+        if journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -q 'ME writer restored'; then
+          info "telemt: ${me_fail} transient ME drops in last 100 lines — writers auto-restored (self-heals, normal)"
+        else
+          warn "telemt: ME pool failures in last 100 log lines (${me_fail}) — sponsored channel may not inject"
+        fi
+        journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -iE 'All ME servers|ME (pool|servers?|writer).{0,40}(failed|lost|exhaust)|middle_proxy.*(failed|lost|exhaust)' | tail -n 3 | cut -c1-150 | sed 's/^/          /'
       fi
       local up_fail
       up_fail="$(journalctl -u "$svc" -n 100 --no-pager 2>/dev/null | grep -c 'Upstream failed after retries' || true)"
       if [ "${up_fail:-0}" -ge 3 ]; then
-        info "direct-DC fallback timeouts seen (${up_fail}/100 lines) — non-fatal while Middle Proxy path is OK"
+        info "direct-DC fallback is dead on this server (${up_fail} timeouts/100 lines) — harmless, traffic rides the ME path"
+        if ! grep -q '^me2dc_fallback = false' "${MTTURBO_HOME}/telemt.toml" 2>/dev/null; then
+          info "        silence it:  sed -i '/^use_middle_proxy = true/a me2dc_fallback = false' ${MTTURBO_HOME}/telemt.toml && systemctl restart ${svc}"
+        fi
       fi
     else
       warn "telemt: Middle-Proxy traffic not seen in recent logs — sponsor tag may be inactive"
