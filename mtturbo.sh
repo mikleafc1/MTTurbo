@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.7"
+SCRIPT_VERSION="1.1.8"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -148,6 +148,20 @@ port_in_use() {
   else
     netstat -tln 2>/dev/null | grep -q ":$1 "
   fi
+}
+
+# Wait for a service to be active AND its port to accept connections.
+# telemt's probe phase (proxy-secret download, STUN via intermediate
+# servers, ME handshake) takes ~6-10s BEFORE the listener binds, so the
+# old fixed 'sleep 2' check always produced a false "failed to start".
+wait_up() {
+  local svc="$1" port="$2" timeout="${3:-30}" waited=0
+  while [ "$waited" -lt "$timeout" ]; do
+    if systemctl is-active --quiet "$svc" && port_in_use "$port"; then return 0; fi
+    sleep 2
+    waited=$((waited+2))
+  done
+  systemctl is-active --quiet "$svc" && port_in_use "$port"
 }
 
 valid_port() {
@@ -580,11 +594,12 @@ install_engine() {
 
   step "Creating systemd service"
   write_service "$engine"
-  sleep 2
-  if systemctl is-active --quiet "$([ "$engine" = "mtg" ] && echo "$MTG_SERVICE" || echo "$TELEMT_SERVICE")"; then
-    ok "Service is up and running"
+  local svc_name; [ "$engine" = "mtg" ] && svc_name="$MTG_SERVICE" || svc_name="$TELEMT_SERVICE"
+  if wait_up "$svc_name" "$port" 30; then
+    ok "Service is up and running (port $port listening)"
   else
-    err "Service failed to start. Check: journalctl -u mtturbo-* -n 30"
+    err "Service failed to start — last log lines:"
+    journalctl -u "$svc_name" -n 8 --no-pager 2>/dev/null | sed 's/^/        /'
   fi
 
   apply_sysctl
@@ -766,11 +781,11 @@ sponsor_action() {
       systemctl stop "$MTG_SERVICE" 2>/dev/null; systemctl disable "$MTG_SERVICE" 2>/dev/null
       rm -f "/etc/systemd/system/${MTG_SERVICE}.service"
       write_service "telemt"
-      sleep 2
-      if systemctl is-active --quiet "$TELEMT_SERVICE" && port_in_use "$PORT"; then
+      if wait_up "$TELEMT_SERVICE" "$PORT" 30; then
         ok "Switched to telemt with ad-tag — proxy is back online."
       else
-        err "telemt failed to start. Check: journalctl -u $TELEMT_SERVICE -n 30"
+        err "telemt failed to start — last log lines:"
+        journalctl -u "$TELEMT_SERVICE" -n 8 --no-pager 2>/dev/null | sed 's/^/          /'
       fi
     fi
     pause_enter
@@ -782,11 +797,11 @@ sponsor_action() {
     write_telemt_config "$PORT" "${SECRET:2:32}" "$DOMAIN" "$newtag" "$IP4"
     write_env "telemt" "$PORT" "$SECRET" "$DOMAIN" "$CHANNEL" "$newtag" "$IP4" "$IP6"
     write_service "telemt"
-    sleep 2
-    if systemctl is-active --quiet "$TELEMT_SERVICE" && port_in_use "$PORT"; then
-      ok "Ad-tag updated — restart complete."
+    if wait_up "$TELEMT_SERVICE" "$PORT" 30; then
+      ok "Ad-tag updated — restart complete (port $PORT listening)."
     else
-      err "telemt failed to start. Check: journalctl -u $TELEMT_SERVICE -n 30"
+      err "telemt failed to start — last log lines:"
+      journalctl -u "$TELEMT_SERVICE" -n 8 --no-pager 2>/dev/null | sed 's/^/          /'
     fi
   fi
   pause_enter
