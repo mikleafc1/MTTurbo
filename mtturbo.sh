@@ -16,7 +16,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.1.9"
+SCRIPT_VERSION="1.2.0"
 MTTURBO_HOME="/etc/mtturbo"
 MTTURBO_ENV="${MTTURBO_HOME}/mtturbo.env"
 MTTURBO_VAR="/var/lib/mtturbo"
@@ -367,21 +367,28 @@ EOF
 }
 
 write_telemt_config() {
-  # $1 port  $2 hex16secret  $3 domain  $4 tag(optional)  $5 ip(optional)
-  local tag_line="" host_line=""
+  # $1 port  $2 hex16secret  $3 domain  $4 tag(optional)  $5 public IPv4(optional)
+  local tag_line="" host_line="" nat_line=""
   if [ -n "$4" ]; then
     valid_ad_tag "$4" || { err "Refusing to write invalid Telemt ad-tag."; return 1; }
     tag_line="ad_tag = \"$4\""
   fi
-  [ -n "$5" ] && host_line="public_host = \"$5\""
-  # telemt stores TLS-front data relative to its working directory
+  if [ -n "$5" ]; then
+    host_line="public_host = \"$5\""
+    nat_line="middle_proxy_nat_ip = \"$5\""
+  fi
+
+  # Telemt stores TLS-front data relative to its working directory.
   mkdir -p "${MTTURBO_VAR}/tlsfront"
+
   cat > "${MTTURBO_HOME}/telemt.toml" <<EOF
 # MTTurbo - telemt engine config (generated)
+# Sponsor/Middle-Proxy configuration with explicit public NAT IPv4.
 [general]
 use_middle_proxy = true
 log_level = "normal"
 ${tag_line}
+${nat_line}
 
 [general.modes]
 classic = false
@@ -392,6 +399,11 @@ tls = true
 show = "*"
 ${host_line}
 public_port = $1
+
+[network]
+ipv4 = true
+ipv6 = false
+prefer = 4
 
 [server]
 port = $1
@@ -987,6 +999,75 @@ uninstall_action() {
   fi
 }
 
+
+# ------------------------- Existing-install update ---------------------------
+apply_telemt_fix_action() {
+  banner
+  echo -e " ${BG}  🔧 APPLY TELEMT MIDDLE-PROXY FIX  ${N}"
+  line "-" 58
+  read_env
+
+  if [ "${ENGINE:-}" != "telemt" ]; then
+    err "Current MTTurbo engine is not telemt."
+    info "This action only updates an existing Telemt installation."
+    pause_enter
+    return 1
+  fi
+
+  if [ -z "${PORT:-}" ] || [ -z "${SECRET:-}" ]; then
+    err "MTTurbo state is incomplete: PORT/SECRET missing."
+    pause_enter
+    return 1
+  fi
+
+  local ip4="${IP4:-}"
+  if [ -z "$ip4" ]; then
+    ip4="$(public_ip4)"
+  fi
+  if [ -z "$ip4" ]; then
+    err "Could not determine the server's public IPv4."
+    return 1
+  fi
+
+  local secret16="${SECRET:2:32}"
+  if [ "${SECRET:0:2}" != "ee" ] || [ "${#secret16}" -ne 32 ]; then
+    err "Current FakeTLS secret is not in the expected ee + 32-hex format."
+    return 1
+  fi
+
+  if [ -f "${MTTURBO_HOME}/telemt.toml" ]; then
+    cp -a "${MTTURBO_HOME}/telemt.toml" "${MTTURBO_HOME}/telemt.toml.backup-$(date +%Y%m%d-%H%M%S)"
+    ok "Existing telemt.toml backed up."
+  fi
+
+  write_telemt_config "${PORT}" "${secret16}" "${DOMAIN}" "${TAG:-}" "$ip4" || return 1
+  write_env "telemt" "$PORT" "$SECRET" "$DOMAIN" "${CHANNEL:-}" "${TAG:-}" "$ip4" "${IP6:-}"
+
+  step "Refreshing Telemt systemd service"
+  write_service "telemt"
+
+  if wait_up "$TELEMT_SERVICE" "$PORT" 30; then
+    ok "Telemt restarted and port $PORT is listening."
+  else
+    err "Telemt did not become ready within 30 seconds."
+    journalctl -u "$TELEMT_SERVICE" -n 20 --no-pager 2>/dev/null | sed 's/^/        /'
+    pause_enter
+    return 1
+  fi
+
+  echo ""
+  echo -e " ${G}Applied:${N}"
+  echo -e "   Public NAT IPv4 : ${BC}${ip4}${N}"
+  echo -e "   Outbound family  : ${BC}IPv4${N}"
+  echo -e "   Middle Proxy     : ${BC}enabled${N}"
+  echo -e "   Ad-tag           : ${BC}${TAG:-not set}${N}"
+  echo ""
+  echo -e " ${Y}Important:${N} this changes the Telemt configuration only."
+  echo -e " Your existing FakeTLS secret and ad-tag are preserved."
+  echo ""
+  pause_enter
+}
+
 # ------------------------- Main menu ---------------------------------------
 main_menu() {
   while true; do
@@ -1002,6 +1083,7 @@ main_menu() {
     echo -e "   ${M}8)${N} ${W}🔧  Performance tuning (BBR)${N}"
     echo -e "   ${M}9)${N} ${W}🛠  Service management${N}"
     echo -e "   ${M}10)${N} ${R}🗑  Uninstall${N}"
+    echo -e "   ${M}11)${N} ${W}🔧  Apply Telemt Middle-Proxy fix${N}"
     echo -e "   ${M}0)${N} ${W}Exit${N}"
     echo ""
     read -r -p " 👉 Select an option: " choice
@@ -1016,6 +1098,7 @@ main_menu() {
       8)  tuning_action ;;
       9)  service_menu_action ;;
       10) uninstall_action ;;
+      11) apply_telemt_fix_action ;;
       0)  echo -e "${G}Bye! 🚀${N}"; exit 0 ;;
       *)  warn "Invalid option" ;;
     esac
@@ -1028,8 +1111,9 @@ check_os
 command -v systemctl >/dev/null 2>&1 || { err "systemd is required."; exit 1; }
 
 case "${1:-}" in
-  --quick) quick_install_action ;;
-  --info)  print_proxy_info ;;
-  --uninstall) uninstall_action ;;
-  *)       main_menu ;;
+  --quick)       quick_install_action ;;
+  --info)        print_proxy_info ;;
+  --apply-fix)   apply_telemt_fix_action ;;
+  --uninstall)   uninstall_action ;;
+  *)             main_menu ;;
 esac
