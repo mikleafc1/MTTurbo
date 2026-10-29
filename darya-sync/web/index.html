@@ -19,10 +19,12 @@
     <span id="clock" class="muted"></span>
     <button class="btn btn-ghost" onclick="testConnections(this)">🔌 تست اتصال‌ها</button>
     <button class="btn btn-primary" onclick="runAll(this)">⚡ همگام‌سازی فوری</button>
+    <button class="btn btn-danger" id="exit-btn" onclick="exitApp(this)" title="توقف برنامه و پایان همگام‌سازی">⏻ خروج</button>
   </div>
 </header>
 
 <main>
+  {{if .TempWarn}}<div class="banner warn">⚠️ برنامه را مستقیم از داخل فایل فشرده اجرا کرده‌اید و تنظیمات ذخیره‌شده موقت است. لطفاً ابتدا زیپ را Extract کنید و DaryaSync.exe را از پوشهٔ واقعی (مثلاً <span dir="ltr">C:\DaryaSync\</span>) اجرا نمایید.</div>{{end}}
   <div id="first-run-banner" class="banner hidden">
     ⚙️ اجرای نخست: فایل config.json با مقادیر پیش‌فرض ساخته شد. لطفاً آدرس داریا، کلید API و اطلاعات سایت را در «تنظیمات» ذخیره کنید.
   </div>
@@ -122,6 +124,7 @@ const JOB_FA = {
 };
 let lastStatus = null;
 let configDirty = false;
+let appExiting = false;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -150,6 +153,7 @@ function jobStatusFA(s) {
 }
 
 async function refresh() {
+  if (appExiting) return;
   try {
     const st = await api('/api/status');
     if (!st || !st.jobs) return;
@@ -194,6 +198,17 @@ async function refresh() {
         '</div></div>';
     }).join('');
   } catch (e) { /* server momentarily unreachable */ }
+}
+
+async function exitApp(btn) {
+  if (appExiting) return;
+  if (!confirm('DaryaSync متوقف شود؟ همگام‌سازی زمان‌بندی‌شده هم تا اجرای دوبارهٔ برنامه متوقف می‌ماند.')) return;
+  appExiting = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'در حال خروج…'; }
+  await api('/api/exit', { method: 'POST' });
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div class="banner">⏻ DaryaSync متوقف شد. حالا می‌توانید این صفحه را ببندید؛ برای اجرای دوباره، DaryaSync.exe را اجرا کنید.</div>');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function runJob(job, btn) {

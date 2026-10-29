@@ -15,13 +15,15 @@ import (
 //go:embed web/index.html web/app.css
 var webFS embed.FS
 
-const appVersion = "1.0.0"
+const appVersion = "1.0.1"
 
 // Server is the local admin web UI + API.
 type Server struct {
-        sched *Scheduler
-        log   *Logger
-        dir   string
+        sched    *Scheduler
+        log      *Logger
+        dir      string
+        exitCh   chan struct{} // closed when the user requests exit from the panel
+        tempWarn bool          // running from inside an archive temp dir
 
         mu      sync.Mutex
         httpSrv *http.Server
@@ -29,8 +31,8 @@ type Server struct {
 }
 
 // NewServer builds the server (not started yet).
-func NewServer(s *Scheduler, log *Logger, dir string) *Server {
-        return &Server{sched: s, log: log, dir: dir, started: time.Now()}
+func NewServer(s *Scheduler, log *Logger, dir string, exitCh chan struct{}, tempWarn bool) *Server {
+        return &Server{sched: s, log: log, dir: dir, exitCh: exitCh, tempWarn: tempWarn, started: time.Now()}
 }
 
 // indexData is passed to the HTML template.
@@ -38,6 +40,7 @@ type indexData struct {
         Listen   string
         Version  string
         FirstRun bool
+        TempWarn bool
 }
 
 // Handler builds the route mux.
@@ -47,7 +50,7 @@ func (sv *Server) Handler() http.Handler {
 
         mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
                 cfg := sv.sched.Cfg()
-                data := indexData{Listen: cfg.Listen, Version: appVersion, FirstRun: cfg.FirstRun}
+                data := indexData{Listen: cfg.Listen, Version: appVersion, FirstRun: cfg.FirstRun, TempWarn: sv.tempWarn}
                 w.Header().Set("Content-Type", "text/html; charset=utf-8")
                 if err := tpl.Execute(w, data); err != nil {
                         sv.log.Logf("render index: %v", err)
@@ -68,6 +71,8 @@ func (sv *Server) Handler() http.Handler {
         mux.HandleFunc("POST /api/test", sv.handleTest)
         mux.HandleFunc("GET /api/log", sv.handleLog)
         mux.HandleFunc("POST /api/config", sv.handleConfig)
+        mux.HandleFunc("POST /api/exit", sv.handleExit)
+        mux.HandleFunc("GET /api/exit", sv.handleExit)
         mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
                 http.NotFound(w, r)
         })
@@ -85,6 +90,13 @@ func logRequests(log *Logger, next http.Handler) http.Handler {
                 }
                 next.ServeHTTP(w, r)
         })
+}
+
+// httpServerRef exposes the running server for graceful shutdown.
+func (sv *Server) httpServerRef() *http.Server {
+        sv.mu.Lock()
+        defer sv.mu.Unlock()
+        return sv.httpSrv
 }
 
 // Start launches the HTTP server in a goroutine.
@@ -244,6 +256,21 @@ func atoi(s string) (int, error) {
                 }
         }
         return n, nil
+}
+
+// handleExit shuts the application down gracefully (from the panel button
+// or `DaryaSync.exe exit`). The main goroutine performs the actual shutdown.
+func (sv *Server) handleExit(w http.ResponseWriter, r *http.Request) {
+        sv.log.Logf("درخواست خروج دریافت شد (%s)", r.Method)
+        writeJSON(w, http.StatusOK, map[string]any{
+                "ok":      true,
+                "message": "در حال توقف DaryaSync … حالا می‌توانید این صفحه را ببندید.",
+        })
+        select {
+        case <-sv.exitCh: // already closing
+        default:
+                close(sv.exitCh)
+        }
 }
 
 func (sv *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
