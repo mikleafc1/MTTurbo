@@ -21,7 +21,7 @@ class SyncService
 
         switch ($path) {
             case 'v1/ping':
-                return ['pong' => true, 'app' => 'Darya', 'version' => '1.0.0', 'time' => now()];
+                return ['pong' => true, 'app' => 'Darya', 'version' => '1.1.0', 'time' => now()];
 
             case 'v1/products/upsert':
                 return self::productsUpsert($body);
@@ -380,7 +380,7 @@ class SyncService
     public static function refreshCustomerBalance(int $customerId): void
     {
         Database::q(
-            'UPDATE customers c SET c.balance = COALESCE((SELECT SUM(i.total - i.paid_amount) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ("unpaid","partial","pending")),0) WHERE c.id = ?',
+            "UPDATE customers SET balance = COALESCE((SELECT SUM(i.total - i.paid_amount) FROM invoices i WHERE i.customer_id = customers.id AND i.status IN ('unpaid','partial','pending')),0) WHERE id = ?",
             [$customerId]
         );
     }

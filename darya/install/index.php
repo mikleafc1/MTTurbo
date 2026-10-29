@@ -18,7 +18,7 @@ function req_check(): array
 {
     return [
         ['PHP 8.1+', version_compare(PHP_VERSION, '8.1.0', '>='), PHP_VERSION],
-        ['PDO MySQL', extension_loaded('pdo_mysql'), ''],
+        ['PDO (MySQL یا SQLite)', extension_loaded('pdo_mysql') || extension_loaded('pdo_sqlite'), ''],
         ['mbstring', extension_loaded('mbstring'), ''],
         ['OpenSSL', extension_loaded('openssl'), ''],
         ['cURL (برای افزونه)', extension_loaded('curl'), ''],
@@ -35,6 +35,7 @@ $apiKey = '';
 $step = 'start';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $driver = ($_POST['db_driver'] ?? 'mysql') === 'sqlite' ? 'sqlite' : 'mysql';
     $db = [
         'host' => trim($_POST['db_host'] ?? 'localhost'),
         'name' => trim($_POST['db_name'] ?? ''),
@@ -53,12 +54,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($admin['username'] === '' || strlen($admin['password']) < 6) {
             throw new RuntimeException('نام کاربری مدیر و رمز عبور (حداقل ۶ کاراکتر) الزامی است.');
         }
-        $pdo = new PDO("mysql:host={$db['host']};charset=utf8mb4", $db['user'], $db['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$db['name']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $pdo->exec("USE `{$db['name']}`");
+        if ($driver === 'sqlite') {
+            @mkdir(BASE_PATH . '/data', 0755, true);
+            $dbFile = BASE_PATH . '/data/darya.sqlite';
+            $pdo = new PDO('sqlite:' . $dbFile, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $pdo->exec('PRAGMA journal_mode = WAL');
+            $pdo->exec('PRAGMA foreign_keys = ON');
+            $schemaFile = BASE_PATH . '/database/schema.sqlite.sql';
+        } else {
+            $pdo = new PDO("mysql:host={$db['host']};charset=utf8mb4", $db['user'], $db['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$db['name']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            $pdo->exec("USE `{$db['name']}`");
+            $schemaFile = BASE_PATH . '/database/schema.sql';
+        }
 
         // اجرای اسکیما
-        $sql = file_get_contents(BASE_PATH . '/database/schema.sql');
+        $sql = file_get_contents($schemaFile);
         foreach (array_filter(array_map('trim', explode(";\n", $sql))) as $stmt) {
             $stmt = trim(preg_replace('#^--.*$#m', '', $stmt));
             if ($stmt !== '') $pdo->exec($stmt);
@@ -77,14 +88,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ->execute(['کلید اصلی همگام‌سازی', substr($apiKey, 0, 10), hash('sha256', $apiKey), '*']);
 
         $pdo->prepare('UPDATE settings SET `value` = ? WHERE `key` = ?')->execute([$company, 'company_name']);
+        if ($driver === 'sqlite' && $pdo->query("SELECT COUNT(*) FROM settings WHERE \"key\" = 'company_name'")->fetchColumn() == 0) {
+            $pdo->prepare('INSERT INTO settings ("key", "value") VALUES (?,?)')->execute(['company_name', $company]);
+        }
 
         // نوشتن config
-        $tpl = <<<PHP
+        if ($driver === 'sqlite') {
+            $conf = <<<PHP
 <?php
 return [
     'debug'    => false,
     'timezone' => 'Asia/Tehran',
     'db' => [
+        'driver' => 'sqlite',
+        'path'   => __DIR__ . '/../data/darya.sqlite',
+    ],
+];
+PHP;
+        } else {
+            $conf = <<<PHP
+<?php
+return [
+    'debug'    => false,
+    'timezone' => 'Asia/Tehran',
+    'db' => [
+        'driver'  => 'mysql',
         'host'    => '%s',
         'name'    => '%s',
         'user'    => '%s',
@@ -93,7 +121,8 @@ return [
     ],
 ];
 PHP;
-        $conf = sprintf($tpl, addslashes($db['host']), addslashes($db['name']), addslashes($db['user']), addslashes($db['pass']));
+            $conf = sprintf($conf, addslashes($db['host']), addslashes($db['name']), addslashes($db['user']), addslashes($db['pass']));
+        }
         file_put_contents(BASE_PATH . '/config/config.php', $conf);
         @chmod(BASE_PATH . '/config/config.php', 0644);
         @mkdir(BASE_PATH . '/uploads', 0755, true);
@@ -135,7 +164,7 @@ button{background:#0f766e;color:#fff;border:none;padding:12px 26px;border-radius
     <div class="card" style="text-align:center">
         <div style="width:52px;height:52px;background:#0f766e;color:#fff;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:800">د</div>
         <h1>نصب سامانه داریا</h1>
-        <p class="muted">حسابداری و مدیریت کسب‌وکار — نسخه ۱.۰.۰</p>
+        <p class="muted">حسابداری و مدیریت کسب‌وکار — نسخه ۱.۱.۰</p>
     </div>
 
     <?php foreach ($errors as $er): ?><div class="alert"><?= htmlspecialchars($er) ?></div><?php endforeach; ?>
@@ -162,6 +191,11 @@ button{background:#0f766e;color:#fff;border:none;padding:12px 26px;border-radius
             <h2>۲) اطلاعات دیتابیس و حساب مدیر</h2>
             <?php if (!$allOk): ?><div class="alert">برخی پیش‌نیازها فراهم نیستند؛ نصب ممکن است ناموفق باشد.</div><?php endif; ?>
             <form method="post">
+                <label>نوع دیتابیس</label>
+                <select name="db_driver" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:9px;font-family:inherit;font-size:14px;box-sizing:border-box">
+                    <option value="mysql" <?= (($_POST['db_driver'] ?? 'mysql') === 'mysql') ? 'selected' : '' ?>>MySQL / MariaDB (هاست cPanel — پیشنهادی برای نسخه وب)</option>
+                    <option value="sqlite" <?= (($_POST['db_driver'] ?? '') === 'sqlite') ? 'selected' : '' ?>>SQLite (بدون نیاز به دیتابیس MySQL — فایل محلی)</option>
+                </select>
                 <label>هاست دیتابیس</label>
                 <input name="db_host" value="<?= htmlspecialchars($_POST['db_host'] ?? 'localhost') ?>">
                 <label>نام دیتابیس (در صورت نبود ساخته می‌شود)</label>

@@ -4,6 +4,19 @@ namespace App\Core;
 
 class App
 {
+    /**
+     * نگاشت مسیر جمع به نام کلاس کنترلر (بعضی کنترلرها مفرد هستند)
+     * اول کلاس هم‌نام مسیر جستجو می‌شود، سپس نگاشت.
+     */
+    private const MODULE_ALIASES = [
+        'invoices'   => 'invoice',
+        'products'   => 'product',
+        'categories' => 'category',
+        'warehouses' => 'warehouse',
+        'promoters'  => 'promoter',
+        'purchases'  => 'purchase',
+    ];
+
     public static function run(): void
     {
         $route = trim((string) ($_GET['route'] ?? ''), '/');
@@ -14,10 +27,19 @@ class App
         $action = $parts[1] ?? 'index';
         $args   = array_slice($parts, 2);
 
-        $class = 'App\\Controllers\\' . ucfirst(strtolower($module)) . 'Controller';
+        $moduleLc = strtolower($module);
+        $try = [$moduleLc];
+        if (isset(self::MODULE_ALIASES[$moduleLc])) {
+            $try[] = self::MODULE_ALIASES[$moduleLc];
+        }
+        $class = null;
+        foreach ($try as $t) {
+            $c = 'App\\Controllers\\' . ucfirst($t) . 'Controller';
+            if (class_exists($c)) { $class = $c; break; }
+        }
         $method = lcfirst(str_replace('-', '', ucwords(strtolower($action), '-'))) . 'Action';
 
-        if (!class_exists($class)) {
+        if ($class === null) {
             self::dispatch404();
         }
         $controller = new $class();

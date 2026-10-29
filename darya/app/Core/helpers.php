@@ -11,6 +11,7 @@ function config(?string $key = null, $default = null)
         $flat = [];
         foreach (($GLOBALS['darya_config'] ?? []) as $group => $values) {
             if (is_array($values)) {
+                $flat[$group] = $values; // خود گروه هم قابل دسترس باشد: config('db')
                 foreach ($values as $k => $v) {
                     $flat["$group.$k"] = $v;
                 }
@@ -32,7 +33,7 @@ function url(string $path = ''): string
 
 function asset(string $path): string
 {
-    return url('assets/' . ltrim($path, '/')) . '?v=1.0.0';
+    return url('assets/' . ltrim($path, '/')) . '?v=1.1.0';
 }
 
 function e($value): string

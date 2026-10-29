@@ -21,3 +21,5 @@ darya-sync/dist/*.zip
 # Go
 *.test
 *.out
+php-win.zip
+*.zip

@@ -10,20 +10,37 @@ class Database
     {
         if (self::$pdo === null) {
             $c = config('db');
-            $dsn = sprintf('mysql:host=%s;dbname=%s;charset=%s', $c['host'], $c['name'], $c['charset'] ?? 'utf8mb4');
-            self::$pdo = new \PDO($dsn, $c['user'], $c['pass'], [
+            $opts = [
                 \PDO::ATTR_ERRMODE            => \PDO::ERRMODE_EXCEPTION,
                 \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
-                \PDO::ATTR_EMULATE_PREPARES   => false,
-            ]);
+            ];
+            if (($c['driver'] ?? 'mysql') === 'sqlite') {
+                // نسخه دسکتاپ / نصب بدون MySQL
+                $path = $c['path'] ?? (BASE_PATH . '/data/darya.sqlite');
+                $dir = dirname($path);
+                if (!is_dir($dir)) @mkdir($dir, 0755, true);
+                self::$pdo = new \PDO('sqlite:' . $path, null, null, $opts);
+                self::$pdo->exec('PRAGMA journal_mode = WAL');
+                self::$pdo->exec('PRAGMA foreign_keys = ON');
+                self::$pdo->exec('PRAGMA busy_timeout = 5000');
+            } else {
+                $dsn = sprintf('mysql:host=%s;dbname=%s;charset=%s', $c['host'], $c['name'], $c['charset'] ?? 'utf8mb4');
+                $opts[\PDO::ATTR_EMULATE_PREPARES] = false;
+                self::$pdo = new \PDO($dsn, $c['user'], $c['pass'], $opts);
+            }
         }
         return self::$pdo;
     }
 
     public static function q(string $sql, array $params = []): \PDOStatement
     {
-        $st = self::pdo()->prepare($sql);
-        $st->execute($params);
+        try {
+            $st = self::pdo()->prepare($sql);
+            $st->execute($params);
+        } catch (\Throwable $e) {
+            error_log('[DARYA-SQL] ' . $e->getMessage() . ' <<SQL>> ' . $sql . ' <<PARAMS>> ' . json_encode($params, JSON_UNESCAPED_UNICODE));
+            throw $e;
+        }
         return $st;
     }
 

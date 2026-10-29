@@ -20,7 +20,11 @@ $config = require BASE_PATH . '/config/config.php';
 $GLOBALS['darya_config'] = $config;
 
 spl_autoload_register(function (string $class): void {
-    $file = BASE_PATH . '/' . str_replace('\\', '/', $class) . '.php';
+    $rel = str_replace('\\', '/', $class) . '.php';
+    if (str_starts_with($rel, 'App/')) {
+        $rel = 'app' . substr($rel, 3); // پوشه واقعی با حروف کوچک (سازگاری لینوکس/ویندوز)
+    }
+    $file = BASE_PATH . '/' . $rel;
     if (is_file($file)) {
         require $file;
     }
