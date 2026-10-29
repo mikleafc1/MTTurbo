@@ -1,0 +1,15 @@
+/* چاپ A4 — فاکتور و گزارش */
+*{box-sizing:border-box}
+body{font-family:"Vazirmatn",Tahoma,sans-serif;color:#111;padding:24px;direction:rtl}
+.print-head{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px}
+.print-head h1{font-size:20px}
+.print-meta{font-size:13px;text-align:left}
+.print-meta div{margin-bottom:2px}
+table.items{width:100%;border-collapse:collapse;font-size:12.5px}
+table.items th,table.items td{border:1px solid #333;padding:7px 9px;text-align:right}
+table.items th{background:#f2f2f2}
+.totals{margin-top:14px;width:320px;margin-left:0;margin-right:auto}
+.totals div{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed #999;font-size:13px}
+.totals .grand{font-weight:800;border-bottom:2px solid #111}
+.print-foot{margin-top:26px;font-size:11px;color:#555;display:flex;justify-content:space-between}
+@media print{.no-print{display:none!important}}

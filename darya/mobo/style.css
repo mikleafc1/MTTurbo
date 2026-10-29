@@ -1,0 +1,114 @@
+/* داریا موبوآردر — استایل موبایل‌اول RTL */
+:root{
+  --primary:#0f766e;--primary-dark:#115e59;--primary-soft:#d1fae5;
+  --bg:#f4f5f7;--card:#ffffff;--text:#1f2937;--muted:#6b7280;--border:#e5e7eb;
+  --danger:#dc2626;--danger-soft:#fee2e2;--amber:#b45309;--amber-soft:#fef3c7;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{font-family:Tahoma,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:14px;
+  padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+a{color:var(--primary);text-decoration:none}
+
+/* ---------- نوار بالا ---------- */
+.topbar{position:sticky;top:0;z-index:40;background:var(--primary);color:#fff;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));
+  box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px}
+.brand .logo{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.16);
+  display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800}
+.topbar-user{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.topbar-user .user-name{font-weight:700}
+.cart-link{position:relative;color:#fff;font-size:18px}
+.cart-count{position:absolute;top:-8px;left:-10px;background:var(--amber-soft);color:var(--amber);
+  border-radius:99px;font-size:10.5px;padding:1px 5px;font-weight:800}
+.logout{color:#fecaca;font-size:12px;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:3px 9px}
+
+/* ---------- پیام‌ها ---------- */
+.alert{margin:10px 12px 0;padding:10px 12px;border-radius:10px;font-size:12.5px;border:1px solid transparent}
+.alert-success{background:var(--primary-soft);color:#065f46;border-color:#a7f3d0}
+.alert-error{background:var(--danger-soft);color:#991b1b;border-color:#fecaca}
+
+/* ---------- ورود ---------- */
+.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.login-card{background:var(--card);border:1px solid var(--border);border-radius:16px;
+  width:100%;max-width:340px;padding:26px 20px;text-align:center;
+  box-shadow:0 10px 30px rgba(0,0,0,.07)}
+.login-logo{width:54px;height:54px;margin:0 auto 10px;border-radius:14px;background:var(--primary);
+  color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800}
+.login-card h1{font-size:18px;margin:0 0 4px}
+.login-card p{margin:0 0 14px}
+.login-card .form-label{display:block;text-align:right;font-size:12px;color:var(--muted);margin:12px 0 5px;font-weight:700}
+.login-card .form-input{width:100%;border:1px solid var(--border);border-radius:10px;padding:11px 12px;
+  font-size:14px;font-family:inherit;background:#fff}
+.login-card .form-input:focus{outline:none;border-color:var(--primary)}
+.login-card .btn-block{margin-top:18px}
+.login-card .hint{font-size:11px;color:var(--muted);margin-top:16px;line-height:1.8}
+
+/* ---------- شبکه محصولات ---------- */
+.p-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:12px}
+.p-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:10px;
+  display:flex;flex-direction:column;gap:7px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.p-thumb{width:42px;height:42px;border-radius:11px;background:var(--primary-soft);color:var(--primary);
+  display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:800}
+.p-name{font-size:13px;font-weight:700;line-height:1.6;min-height:38px}
+.p-price{font-size:13.5px;font-weight:800;color:var(--primary)}
+.p-price small{font-size:10.5px;color:var(--muted);font-weight:400}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700}
+.badge-green{background:var(--primary-soft);color:var(--primary)}
+.badge-red{background:var(--danger-soft);color:var(--danger)}
+
+/* ---------- استپر تعداد ---------- */
+.stepper{display:flex;align-items:center;gap:6px;margin-top:auto}
+.step-btn{width:34px;height:34px;flex:0 0 34px;border-radius:10px;border:1px solid var(--border);
+  background:#fff;color:var(--primary);font-size:19px;font-weight:800;cursor:pointer;font-family:inherit}
+.step-btn:active{background:var(--primary-soft)}
+.step-qty{min-width:26px;text-align:center;font-weight:800;font-size:14px}
+.step-input{width:44px;text-align:center;border:1px solid var(--border);border-radius:9px;
+  padding:6px 2px;font-size:13px;font-weight:700;font-family:inherit}
+.step-del{width:30px;height:30px;border-radius:9px;border:1px solid #fecaca;background:var(--danger-soft);
+  color:var(--danger);font-size:13px;cursor:pointer;margin-right:auto}
+
+/* ---------- نوار چسبان سبد ---------- */
+.cart-bar{position:fixed;bottom:0;left:0;right:0;z-index:50;background:var(--card);
+  border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 14px;padding-bottom:calc(10px + env(safe-area-inset-bottom));
+  box-shadow:0 -4px 16px rgba(0,0,0,.08)}
+.cart-total small{display:block;font-size:10.5px;color:var(--muted)}
+.cart-total b{font-size:15px}
+.btn-cart{display:block;width:100%;max-width:220px;background:var(--primary);color:#fff;text-align:center;
+  border:none;border-radius:11px;padding:12px 16px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit}
+.btn-cart:active{background:var(--primary-dark)}
+
+/* ---------- صفحه سبد ---------- */
+.cart-page{padding:12px}
+.c-line{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:10px 12px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;flex-wrap:wrap}
+.c-info{flex:1 1 130px}
+.c-name{font-size:13px;font-weight:700}
+.c-price{font-size:11.5px;color:var(--muted);margin-top:3px}
+.c-total{font-weight:800;color:var(--primary);font-size:13.5px;min-width:80px;text-align:left}
+.c-sum{background:var(--card);border:1px dashed var(--border);border-radius:12px;padding:12px;
+  text-align:center;font-size:13.5px;margin:14px 0 6px}
+
+/* ---------- صفحه موفقیت / حالت خالی ---------- */
+.success-wrap{background:var(--card);border:1px solid var(--border);border-radius:16px;margin:20px 12px;
+  padding:26px 18px;text-align:center}
+.success-icon{width:56px;height:56px;margin:0 auto 12px;border-radius:50%;background:var(--primary-soft);
+  color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800}
+.success-wrap h1{font-size:17px;margin:0 0 8px}
+.success-wrap p{margin:6px 0}
+.success-wrap .btn-block{margin-top:16px}
+.empty-state{text-align:center;color:var(--muted);padding:46px 14px;line-height:2;font-size:13px}
+.muted{color:var(--muted)}
+
+/* ---------- دکمه سراسری ---------- */
+.btn-block{display:block;width:100%;background:var(--primary);color:#fff;border:none;border-radius:11px;
+  padding:12px;font-size:14px;font-weight:800;cursor:pointer;text-align:center;font-family:inherit}
+.btn-block:active{background:var(--primary-dark)}
+
+/* دسکتاپ: گرید ۳ ستونه */
+@media (min-width:640px){
+  .p-grid{grid-template-columns:repeat(3,1fr);max-width:760px;margin:0 auto}
+}

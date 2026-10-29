@@ -1,0 +1,65 @@
+/* پل داریا — استایل صفحه مدیریت */
+
+.dbr-wrap h1 .dbr-pill {
+	vertical-align: middle;
+	font-size: 13px;
+}
+
+/* قرص‌های وضعیت */
+.dbr-pill {
+	display: inline-block;
+	padding: 1px 10px;
+	border-radius: 12px;
+	font-size: 12px;
+	line-height: 20px;
+	vertical-align: middle;
+	margin-left: 4px;
+}
+.dbr-pill.ok {
+	background: #e7f6e9;
+	color: #1a7f37;
+	border: 1px solid #b7e2c0;
+}
+.dbr-pill.err {
+	background: #fbeaea;
+	color: #b32d2e;
+	border: 1px solid #f1c8c8;
+}
+.dbr-pill.warn {
+	background: #fdf3e0;
+	color: #996800;
+	border: 1px solid #f0dfb2;
+}
+.dbr-pill.info {
+	background: #e8f1fb;
+	color: #1d4ed8;
+	border: 1px solid #c3d8f5;
+}
+
+/* جدول‌ها */
+.dbr-wrap .form-table th {
+	width: 240px;
+}
+.dbr-roles-table input[type="text"] {
+	direction: ltr;
+	text-align: left;
+	width: 260px;
+}
+.dbr-log-table .col-time {
+	white-space: nowrap;
+}
+
+/* فرم‌های کنار هم (دکمه‌های صف) */
+.dbr-inline-form {
+	display: inline-block;
+	margin: 0 0 0 8px;
+}
+
+#dbr-test-result {
+	margin-top: 10px;
+}
+
+.dbr-muted {
+	color: #666;
+	font-size: 12px;
+}

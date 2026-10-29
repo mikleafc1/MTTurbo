@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>داریا-سینک | پنل مدیریت همگام‌سازی</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">⇄</span>
+    <div>
+      <h1>داریا-سینک</h1>
+      <small>همگام‌سازی ووکامرس با نرم‌افزار داریا — نسخه {{.Version}}</small>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span id="clock" class="muted"></span>
+    <button class="btn btn-ghost" onclick="testConnections(this)">🔌 تست اتصال‌ها</button>
+    <button class="btn btn-primary" onclick="runAll(this)">⚡ همگام‌سازی فوری</button>
+  </div>
+</header>
+
+<main>
+  <div id="first-run-banner" class="banner hidden">
+    ⚙️ اجرای نخست: فایل config.json با مقادیر پیش‌فرض ساخته شد. لطفاً آدرس داریا، کلید API و اطلاعات سایت را در «تنظیمات» ذخیره کنید.
+  </div>
+
+  <section class="grid connections">
+    <div class="card conn" id="card-darya">
+      <div class="card-head">
+        <h2>🖥️ نرم‌افزار داریا</h2>
+        <span class="badge" id="darya-badge">…</span>
+      </div>
+      <div class="row"><span class="lbl">آدرس</span><span id="darya-url" class="val mono">—</span></div>
+      <div class="row"><span class="lbl">کلید API</span><span id="darya-key" class="val mono">—</span></div>
+      <div class="row"><span class="lbl">وضعیت</span><span id="darya-msg" class="val">در انتظار بررسی…</span></div>
+    </div>
+    <div class="card conn" id="card-wp">
+      <div class="card-head">
+        <h2>🛒 سایت وردپرس (افزونه Darya Bridge)</h2>
+        <span class="badge" id="wp-badge">…</span>
+      </div>
+      <div class="row"><span class="lbl">آدرس</span><span id="wp-url" class="val mono">—</span></div>
+      <div class="row"><span class="lbl">Secret افزونه</span><span id="wp-secret" class="val mono">—</span></div>
+      <div class="row"><span class="lbl">وضعیت</span><span id="wp-msg" class="val">در انتظار بررسی…</span></div>
+      <div class="row"><span class="lbl">صف انتظار افزونه</span><span id="wp-queue" class="val">0</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="sec-title">وظایف همگام‌سازی</h2>
+    <div class="grid jobs" id="jobs-grid"></div>
+  </section>
+
+  <section class="two-col">
+    <div class="card">
+      <div class="card-head">
+        <h2>📜 گزارش رویدادها</h2>
+        <div>
+          <select id="log-lines" onchange="loadLog()">
+            <option value="50">۵۰ خط</option>
+            <option value="100" selected>۱۰۰ خط</option>
+            <option value="300">۳۰۰ خط</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadLog()">↻</button>
+        </div>
+      </div>
+      <pre id="log-view" class="logview">در حال بارگذاری…</pre>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>⚙️ تنظیمات</h2>
+      </div>
+      <form id="config-form" onsubmit="return saveConfig(event)">
+        <div class="form-grid">
+          <label>آدرس نرم‌افزار داریا
+            <input type="text" name="darya_url" placeholder="مثلاً https://darya.example.com" dir="ltr">
+          </label>
+          <label>کلید API داریا (dk_...)
+            <input type="text" name="darya_api_key" placeholder="dk_..." dir="ltr" autocomplete="off">
+          </label>
+          <label>آدرس سایت وردپرس
+            <input type="text" name="wp_url" placeholder="مثلاً https://shop.example.com" dir="ltr">
+          </label>
+          <label>Secret افزونه
+            <input type="text" name="wp_secret" placeholder="…" dir="ltr" autocomplete="off">
+          </label>
+          <label>آدرس وب پنل (listen)
+            <input type="text" name="listen" dir="ltr">
+          </label>
+        </div>
+
+        <h3>وظایف</h3>
+        <table class="jobs-tbl">
+          <thead><tr><th>وظیفه</th><th>فعال</th><th>بازه (دقیقه)</th></tr></thead>
+          <tbody id="jobs-config-rows"></tbody>
+        </table>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">💾 ذخیره تنظیمات</button>
+          <span id="config-msg" class="msg"></span>
+        </div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<footer class="muted center">
+  DaryaSync {{.Version}} — وب‌سرور محلی روی {{.Listen}} · داده‌ها فقط بین سایت شما و داریا جابه‌جا می‌شوند.
+</footer>
+
+<script>
+const JOB_FA = {
+  trigger:  { name: 'همگام‌سازی رویدادها (Trigger)', desc: 'اجرای صف افزونه + صف داریا' },
+  roles:    { name: 'کاربران و نقش‌ها',              desc: 'وردپرس ← داریا (users/sync)' },
+  products: { name: 'محصولات',                       desc: 'وردپرس ← داریا (products/upsert)' },
+  orders:   { name: 'سفارش‌ها',                      desc: 'وردپرس ← داریا (فاکتور فروش)' },
+  carts:    { name: 'سبدهای رهاشده',                 desc: 'وردپرس ← داریا (abandoned-carts)' }
+};
+let lastStatus = null;
+let configDirty = false;
+
+function el(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  let j = null;
+  try { j = await r.json(); } catch (e) { j = { ok: false, error: 'پاسخ نامعتبر سرور' }; }
+  if (!r.ok && j && !j.error && !j.errors) j.error = 'خطای HTTP ' + r.status;
+  return j;
+}
+
+function badge(ok, pending) {
+  if (pending) return '<span class="badge warn">در حال بررسی…</span>';
+  return ok ? '<span class="badge ok">متصل ✔</span>' : '<span class="badge fail">قطع ✖</span>';
+}
+
+function jobStatusFA(s) {
+  if (!s) return '<span class="badge idle">هنوز اجرا نشده</span>';
+  if (s === 'ok') return '<span class="badge ok">موفق</span>';
+  return '<span class="badge fail">خطا</span>';
+}
+
+async function refresh() {
+  try {
+    const st = await api('/api/status');
+    if (!st || !st.jobs) return;
+    lastStatus = st;
+
+    // first-run banner
+    if (st.first_run) el('first-run-banner').classList.remove('hidden');
+
+    // connections
+    const c = st.connections || {};
+    el('card-darya').className = 'card conn ' + (c.darya_ok ? 'up' : 'down');
+    el('card-wp').className = 'card conn ' + (c.wp_ok ? 'up' : 'down');
+    el('darya-badge').outerHTML = badge(c.darya_ok, false).replace('class="badge', 'id="darya-badge" class="badge');
+    el('wp-badge').outerHTML = badge(c.wp_ok, false).replace('class="badge', 'id="wp-badge" class="badge');
+    const cm = st.config_masked || {};
+    el('darya-url').textContent = cm.darya_url || '—';
+    el('darya-key').textContent = cm.darya_api_key || '—';
+    el('darya-msg').textContent = c.darya_msg || '—';
+    el('wp-url').textContent = cm.wp_url || '—';
+    el('wp-secret').textContent = cm.wp_secret || '—';
+    el('wp-msg').textContent = c.wp_msg || '—';
+    el('wp-queue').textContent = (st.queue && typeof st.queue.wp !== 'undefined') ? st.queue.wp : '0';
+
+    // jobs
+    const grid = el('jobs-grid');
+    const editingConfig = configDirty;
+    if (!editingConfig) fillConfigForm(cm, st.jobs);
+    grid.innerHTML = st.jobs.map(j => {
+      const meta = JOB_FA[j.name] || { name: j.name, desc: '' };
+      return '<div class="card job ' + (j.enabled ? '' : 'disabled') + '">' +
+        '<div class="card-head"><h3>' + esc(meta.name) + '</h3>' + jobStatusFA(j.last_status) + '</div>' +
+        '<div class="jdesc">' + esc(meta.desc) + '</div>' +
+        '<div class="row"><span class="lbl">وضعیت</span><span class="val">' + (j.enabled ? 'فعال' : 'غیرفعال') + '</span></div>' +
+        '<div class="row"><span class="lbl">بازه</span><span class="val">هر ' + j.interval_min + ' دقیقه</span></div>' +
+        '<div class="row"><span class="lbl">آخرین اجرا</span><span class="val mono">' + (j.last_run || '—') + '</span></div>' +
+        '<div class="row"><span class="lbl">اجرای بعدی</span><span class="val mono">' + (j.next_run || '—') + '</span></div>' +
+        (j.last_error ? '<div class="jerr" title="' + esc(j.last_error) + '">⚠ ' + esc(j.last_error) + '</div>' : '') +
+        '<div class="jactions">' +
+          (j.running
+            ? '<span class="badge warn">در حال اجرا…</span>'
+            : '<button class="btn btn-sm btn-ghost" onclick="runJob(\'' + j.name + '\', this)">▶ اجرای فوری</button>') +
+        '</div></div>';
+    }).join('');
+  } catch (e) { /* server momentarily unreachable */ }
+}
+
+async function runJob(job, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  const r = await api('/api/run?job=' + encodeURIComponent(job), { method: 'POST' });
+  if (r && r.ok === false && r.error) alert(r.error);
+  setTimeout(refresh, 600);
+  if (btn) { btn.disabled = false; btn.textContent = '▶ اجرای فوری'; }
+}
+
+async function runAll(btn) {
+  if (btn) { btn.disabled = true; }
+  await api('/api/run?job=all', { method: 'POST' });
+  setTimeout(refresh, 600);
+  if (btn) { btn.disabled = false; }
+}
+
+async function testConnections(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'در حال تست…'; }
+  const r = await api('/api/test', { method: 'POST' });
+  if (r) {
+    const d = r.darya || {}, w = r.wp || {};
+    let m = 'داریا: ' + (d.ok ? '✔ ' : '✖ ') + (d.msg || '') + '\nوردپرس: ' + (w.ok ? '✔ ' : '✖ ') + (w.msg || '');
+    (d.ok && w.ok) ? console.info(m) : alert(m);
+  }
+  await refresh();
+  if (btn) { btn.disabled = false; btn.textContent = '🔌 تست اتصال‌ها'; }
+}
+
+async function loadLog() {
+  const n = el('log-lines').value || 100;
+  const r = await api('/api/log?lines=' + n);
+  const view = el('log-view');
+  if (r && r.lines) {
+    view.textContent = r.lines.length ? r.lines.join('\n') : 'لاگی موجود نیست.';
+    view.scrollTop = view.scrollHeight;
+  } else {
+    view.textContent = 'خطا در دریافت لاگ.';
+  }
+}
+
+function fillConfigForm(cm, jobs) {
+  const f = el('config-form');
+  f.listen.value = cm.listen || '';
+  f.darya_url.value = cm.darya_url || '';
+  f.darya_api_key.value = cm.darya_api_key || '';
+  f.wp_url.value = cm.wp_url || '';
+  f.wp_secret.value = cm.wp_secret || '';
+  const rows = el('jobs-config-rows');
+  rows.innerHTML = jobs.map(j => {
+    const meta = JOB_FA[j.name] || { name: j.name };
+    return '<tr>' +
+      '<td>' + esc(meta.name) + '</td>' +
+      '<td><input type="checkbox" name="job_' + j.name + '_enabled"' + (j.enabled ? ' checked' : '') + '></td>' +
+      '<td><input class="num" type="number" min="1" name="job_' + j.name + '_interval" value="' + j.interval_min + '"></td>' +
+      '</tr>';
+  }).join('');
+  configDirty = false;
+}
+
+['listen','darya_url','darya_api_key','wp_url','wp_secret'].forEach(n => {
+  document.addEventListener('input', e => { if (e.target && e.target.name === n) configDirty = true; });
+});
+el('config-form').addEventListener('input', () => { configDirty = true; });
+
+async function saveConfig(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const jobs = {};
+  ['trigger','roles','products','orders','carts'].forEach(n => {
+    jobs[n] = {
+      enabled: f['job_' + n + '_enabled'].checked,
+      interval_min: parseInt(f['job_' + n + '_interval'].value, 10) || 1
+    };
+  });
+  const body = {
+    listen: f.listen.value.trim(),
+    darya_url: f.darya_url.value.trim(),
+    darya_api_key: f.darya_api_key.value.trim(),
+    wp_url: f.wp_url.value.trim(),
+    wp_secret: f.wp_secret.value.trim(),
+    jobs: jobs
+  };
+  const msg = el('config-msg');
+  msg.className = 'msg';
+  msg.textContent = 'در حال ذخیره…';
+  const r = await api('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (r && r.ok) {
+    msg.className = 'msg okm';
+    msg.textContent = '✔ ' + (r.message || 'ذخیره شد');
+    configDirty = false;
+    await refresh();
+  } else {
+    msg.className = 'msg errm';
+    msg.textContent = r ? (r.errors ? '✖ ' + r.errors.join(' | ') : '✖ ' + (r.error || 'خطا')) : '✖ خطای شبکه';
+  }
+  return false;
+}
+
+function tickClock() {
+  el('clock').textContent = new Date().toLocaleTimeString('fa-IR');
+}
+
+tickClock();
+setInterval(tickClock, 1000);
+refresh();
+loadLog();
+setInterval(refresh, 5000);
+setInterval(loadLog, 10000);
+</script>
+</body>
+</html>

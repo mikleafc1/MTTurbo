@@ -1,0 +1,21 @@
+{
+  "name": "داریا موبوآردر",
+  "short_name": "موبوآردر",
+  "description": "سامانه سفارش‌گیری مبلغان سامانه داریا",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "./index.php",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0f766e",
+  "background_color": "#f4f5f7",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f766e'/><text x='50' y='70' font-size='56' text-anchor='middle' fill='%23ffffff' font-family='Tahoma'>د</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

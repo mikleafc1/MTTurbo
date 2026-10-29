@@ -1,0 +1,23 @@
+# OS / IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/
+
+# Darya runtime files
+darya/config/config.php
+darya/config/installed.lock
+darya/uploads/*
+!darya/uploads/.gitkeep
+
+# DaryaSync runtime files
+darya-sync/config.json
+darya-sync/state.json
+darya-sync/darya-sync.log
+darya-sync/dist/*.zip
+
+# Go
+*.test
+*.out

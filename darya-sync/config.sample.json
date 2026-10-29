@@ -1,0 +1,15 @@
+{
+  "listen": "127.0.0.1:8585",
+  "darya_url": "https://darya.example.com",
+  "darya_api_key": "dk_xxxxxxxxxxxxxxxxxxxx",
+  "wp_url": "https://shop.example.com",
+  "wp_secret": "your-plugin-secret",
+  "first_run": true,
+  "jobs": {
+    "trigger":  { "enabled": true, "interval_min": 5 },
+    "roles":    { "enabled": true, "interval_min": 60 },
+    "products": { "enabled": true, "interval_min": 120 },
+    "orders":   { "enabled": true, "interval_min": 10 },
+    "carts":    { "enabled": true, "interval_min": 15 }
+  }
+}
