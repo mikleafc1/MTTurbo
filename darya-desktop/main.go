@@ -29,6 +29,17 @@ var (
         messageBoxW = user32.NewProc("MessageBoxW")
 )
 
+// extFlags: افزونه‌های موردنیاز داریا — باید هم برای راه‌اندازی اولیه (init)
+// و هم برای وب‌سرور لود شوند. در پکیج ویندوزی PHP افزونه‌ها DLL جدایند
+// و بدون این فلگ‌ها توابعی مثل mb_internal_encoding تعریف نشده‌اند.
+func extFlags(base string) []string {
+        flags := []string{"-d", "extension_dir=" + filepath.Join(base, "php", "ext")}
+        for _, ext := range []string{"pdo_sqlite", "sqlite3", "mbstring", "openssl", "curl", "gd", "fileinfo", "zip"} {
+                flags = append(flags, "-d", "extension="+ext)
+        }
+        return flags
+}
+
 func msgBox(title, text string, icon uintptr) {
         t, _ := syscall.UTF16PtrFromString(title)
         m, _ := syscall.UTF16PtrFromString(text)
@@ -77,38 +88,42 @@ func run() {
         }
 
         // آماده‌سازی اولیه (ساخت دیتابیس SQLite + config + حساب مدیر)
+        // ⚠ با همان افزونه‌های وب‌سرور — وگرنه mb_* و PDO SQLite در دسترس نیستند
         _ = os.MkdirAll(dataDir, 0o755)
         if _, err := os.Stat(filepath.Join(appDir, "config", "installed.lock")); err != nil {
-                out, err := runHidden(phpExe, "-d", "display_errors=1", filepath.Join(appDir, "bin", "desktop-init.php"), appDir)
+                initArgs := append(extFlags(base),
+                        "-d", "display_errors=1",
+                        "-d", "date.timezone=Asia/Tehran",
+                        filepath.Join(appDir, "bin", "desktop-init.php"), appDir,
+                )
+                out, err := runHidden(phpExe, initArgs...)
                 if err != nil || !strings.Contains(out, `"ok":true`) {
-                        msgBox("داریا — خطای راه‌اندازی", "راه‌اندازی اولیه ناموفق بود:\n"+lastLines(out, 6), 0x30)
+                        msgBox("داریا — خطای راه‌اندازی", "راه‌اندازی اولیه ناموفق بود:\n"+lastLines(out, 8), 0x30)
                         return
                 }
         }
 
         // اجرای وب‌سرور داخلی PHP
-        args := []string{
-                "-d", "extension_dir=" + filepath.Join(base, "php", "ext"),
-                "-d", "extension=pdo_sqlite",
-                "-d", "extension=sqlite3",
-                "-d", "extension=mbstring",
-                "-d", "extension=openssl",
-                "-d", "extension=curl",
-                "-d", "extension=gd",
-                "-d", "extension=fileinfo",
-                "-d", "extension=zip",
+        args := append(extFlags(base),
                 "-d", "memory_limit=256M",
                 "-d", "upload_max_filesize=20M",
                 "-d", "post_max_size=25M",
                 "-d", "max_execution_time=120",
+                "-d", "display_errors=0",
+                "-d", "log_errors=1",
                 "-d", "date.timezone=Asia/Tehran",
                 "-S", fmt.Sprintf("127.0.0.1:%d", port),
                 "-t", appDir,
                 router,
-        }
+        )
         cmd := exec.Command(phpExe, args...)
         cmd.Dir = base
         cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+        // لاگ وب‌سرور برای عیب‌یابی راه دور: data\php-server.log
+        if f, ferr := os.Create(filepath.Join(dataDir, "php-server.log")); ferr == nil {
+                cmd.Stdout, cmd.Stderr = f, f
+                defer func() { _ = f.Close() }()
+        }
         if err := cmd.Start(); err != nil {
                 msgBox("داریا", "اجرای وب‌سرور محلی ناموفق بود:\n"+err.Error(), 0x30)
                 return
@@ -127,7 +142,7 @@ func run() {
         if ready {
                 openAppWindow()
         } else {
-                msgBox("داریا", "وب‌سرور محلی پاسخ نداد. لطفاً از دوباره اجرا کردن برنامه و آزاد بودن پورت 8765 مطمئن شوید.", 0x30)
+                msgBox("داریا", "وب‌سرور محلی پاسخ نداد.\nجزئیات در فایل  data\\php-server.log  ثبت شده است.\nهمچنین مطمئن شوید پورت 8765 آزاد است.", 0x30)
         }
 
         // مانیتور — تا php زنده است، برنامه هم زنده است

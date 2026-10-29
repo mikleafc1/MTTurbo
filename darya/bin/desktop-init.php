@@ -8,7 +8,10 @@
  */
 declare(strict_types=1);
 error_reporting(E_ALL & ~E_DEPRECATED);
-mb_internal_encoding('UTF-8');
+// mbstring در پکیج ویندوزی PHP یک DLL جدا است؛ اگر لود نشده بود نباید راه‌اندازی متوقف شود
+if (function_exists('mb_internal_encoding')) {
+    mb_internal_encoding('UTF-8');
+}
 
 $app = $argv[1] ?? dirname(__DIR__);
 define('BASE_PATH', rtrim($app, '/\\'));
